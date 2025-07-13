@@ -1,0 +1,790 @@
+function myscreen = DFP_ContrastThresholding_MH(observer,stairStruct,Eye)
+
+
+%% New for caroline DPF
+% We will run 4 interleaved levit staircases, one at each location. Each
+% staircase/location has 20 trials (for 80 trials in total). 
+% Typically, we need 40 trials for an accurate threshold. So after the
+% first block, we then feed in the final contrasts into a second block, and
+% complete the other 20 trials. The output of the 4 staircases are then
+% averaged together and this is the starting contrast for the performance
+% fields experiment. This is not too dissimilar from what was going on
+% before, but it is going to give a more logical measurement of the average
+% contrast sensitivity of the 4 locations.
+
+% we start our staircase at 18% contrast for each location so that we don't
+% need too many steps to get down to a rough threshold. We also set our
+% step size to 6%, assuming that we will follow this pattern
+
+% 15 - 7 = 8%
+% 8 - 7 = 1% and they will probably be incorrect after it hits 1%
+% Now we half it and increase to 4.5% and go from there... This is still
+% pretty bad
+
+% stair1 = RHM (target location - 2), starting at 15% contrast
+% stair2 = UVM (target location - 1), starting at 15% contrast
+% stair3 = LVM (target location - 3), starting at 15% contrast
+% stair4 = LHM (target location - 4), starting at 15% contrast
+
+
+global stimulus;
+global MGL;
+
+% !!!!
+global stairStructure; %!!
+
+% global stairStruct; % I think the global var has to be something new, not
+% one of the current inputs
+cellCheck = isa(stairStruct,'cell');
+if cellCheck == 1 % checking if input variable stairStruct is a cell (containing structures for each staircase)
+    
+    stairStructure = stairStruct;
+    
+end
+%!!!!!
+
+
+thisdir = pwd;
+% make a data directory if necessary
+if ~isdir(fullfile(thisdir,'data'))
+    disp('Making data directory');
+    mkdir('data');
+end
+
+% make an observer directory if necessary
+datadirname = fullfile(thisdir,'data',observer);
+if ~isdir(datadirname);
+    disp(sprintf('Making observer directory %s',datadirname));
+    mkdir(datadirname);
+end
+
+disp(sprintf('[ DATA ] saving data in: %s',datadirname));
+
+stimulus = [];
+% stimulus.StartContrast=ContrastStart; % ! should this be a vector of starting contrasts for all 3 staircases?
+
+% clearing old variables:
+clear task myscreen;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% initalize the screen
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+stimulus.EyeTrack=Eye;
+myscreen.datadir = datadirname;
+myscreen.allowpause = 0;
+myscreen.saveData = -2;
+myscreen.background=.5;
+myscreen.keyboard.nums = [84 85];
+
+% initalize the screen
+myscreen = initScreen(myscreen);
+if stimulus.EyeTrack
+    myscreen = eyeCalibDisp(myscreen);
+end
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% initialize the task
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%1=ITI, 2=fixation 3=endo cue, 4=ISI, 
+%5=stim, 6= isi-2, 7=resp cue, 8=response window
+%9=end of block feedback, 10 = end of block feedback
+
+task{1}.waitForBacktick = 1;
+task{1}.segmin =     [1 Inf .06 .06 .12 .04 .66 5 5];
+task{1}.segmax =     [1 Inf .06 .06 .12 .04 .66 5 5];
+task{1}.getResponse = [0 0 0 0 0 0 0 1 0];
+
+n_repeats = 25; % ! total trials = 100, with 25 per location, This should take roughly 4 minutes.
+
+[contrast, CueCondition, staircase, repeat] = ndgrid(1, 8, 1:4, 1:n_repeats); % ! check whether contrast and location should be RandVars
+% [contrast, location, CueCondition, staircase, repeat] = ndgrid(1, 1:4,7:8,1:6,1:n_repeats); % ! check whether contrast and location should be RandVars
+
+task{1}.numTrials = length(CueCondition(:)); % ! define by another randVar
+task{1}.halfwayBreak = length(CueCondition(:))/2;
+random_order = randperm(task{1}.numTrials);
+task{1}.randVars.contrast = contrast(random_order); % ! always contrast level 1 - check what this means
+task{1}.randVars.CueCondition = CueCondition(random_order); % 7-8=neutral
+% task{1}.randVars.targetLocation = location(random_order); % will always be defined by task{1}.randVars.staircase
+task{1}.randVars.uniform.targetOrientation = 1:2;
+task{1}.randVars.uniform.distractorOrientation1 = 1:2;
+task{1}.randVars.uniform.distractorOrientation2 = 1:2;
+task{1}.randVars.uniform.distractorOrientation3 = 1:2;
+task{1}.randVars.staircase = staircase(random_order);
+
+task{1}.randVars.len_ = task{1}.numTrials;
+stimulus.trialend = 0;
+stimulus.trialnum=1;
+stimulus.FixationBreak=zeros(1,length(CueCondition(:)));
+stimulus.LocationIndices= [1 2 3 4]; % ! delete?
+
+task{1}.random = 1;
+[task{1}, myscreen] = initTask(task{1},myscreen,@StartSegmentCallback,@DrawStimulusCallback,@responseCallback);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% initialize the stimulus
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+myscreen = initStimulus('stimulus',myscreen); %Define the screen
+stimulus = myInitStimulus(stimulus,myscreen,task); %Define our stim
+
+myscreen.eyetracker.savedata = true;%%%%% TO ADD FOR ONLINE EYETRACKING
+myscreen.eyetracker.data = [1 1 1 0];%%%%% TO ADD FOR ONLINE EYETRACKING
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Main display loop
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+phaseNum = 1;
+while (phaseNum <= length(task)) && ~myscreen.userHitEsc
+    % update the task
+    % runs automatically the task, you only need to change: StartSegmentCallback,DrawStimulusCallback,responseCallback
+    [task myscreen phaseNum] = updateTask(task,myscreen,phaseNum);
+    % flip screen
+    myscreen = tickScreen(myscreen,task);
+    
+end
+
+%% Save out the contrast thresholds for each location at the end of the session in 'myscreen'
+myscreen.cThresh_RHM =(stimulus.stair{1,1}.threshold);
+myscreen.cThresh_UVM =(stimulus.stair{1,2}.threshold);
+myscreen.cThresh_LVM =(stimulus.stair{1,3}.threshold);
+myscreen.cThresh_LHM =(stimulus.stair{1,4}.threshold);
+
+myscreen.meanContrasts = [myscreen.cThresh_RHM, myscreen.cThresh_UVM, myscreen.cThresh_LVM, myscreen.cThresh_LHM];
+
+clear stimulus.tmp
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% end of the experiment
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+myscreen = endTask(myscreen,task);
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% TASK 1: function that gets called at the start of each segment
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function [task, myscreen] = StartSegmentCallback(task, myscreen)
+% segments: 1:ITI,   2:fixation,    3:stimulus, 4:response
+global stimulus;
+
+if (task.thistrial.thisseg == 1) % ITI
+    stimulus.tmp.staircaseNum=task.thistrial.staircase;
+    
+    % yoke target location to staircase
+    if stimulus.tmp.staircaseNum == 1 % estimate ct at RHM for 75%
+        task.thistrial.targetLocation = 2;
+        %        task.thistrial.targetLocation = stimulus.HM_loc_ind(stimulus.HM_trialcounter_1); % set target location to 2 or 4, based on prerandomized vector of 2s and 4s of ntrials length
+    elseif stimulus.tmp.staircaseNum == 2 % estimate ct at RHM for 25%
+        task.thistrial.targetLocation = 1;
+        %        task.thistrial.targetLocation = stimulus.HM_loc_ind(stimulus.HM_trialcounter_2);
+        %        stimulus.HM_trialcounter_2 = stimulus.HM_trialcounter_2 + 1;
+    elseif stimulus.tmp.staircaseNum == 3 % estimate ct at UVM for 75%
+        task.thistrial.targetLocation = 3;
+    elseif stimulus.tmp.staircaseNum == 4 % estimate ct at UVM for 25%
+        task.thistrial.targetLocation = 4;
+    end
+    
+    stimulus.trialend = stimulus.trialend + 1;
+    
+elseif (task.thistrial.thisseg == 2) % fixation
+    task.thistrial.fixationbreak = 0;%%%%% TO ADD FOR ONLINE EYETRACKING %%%
+    stimulus.tmp.targetLocation  = stimulus.eccentricity*[stimulus.locations{task.thistrial.targetLocation}];
+    stimulus.tmp.distractorIndices=stimulus.LocationIndices(stimulus.LocationIndices~=task.thistrial.targetLocation);
+    for Locs=1:length(stimulus.tmp.distractorIndices)
+        stimulus.tmp.distractorLocations{Locs}= stimulus.eccentricity*[stimulus.locations{stimulus.tmp.distractorIndices(Locs)}];
+    end
+    stimulus.FixationStarted=0;
+    %response cue
+    stimulus.tmp.respcueLocation=stimulus.respcueLocation{task.thistrial.targetLocation};
+    stimulus.tmp.WedgeStart=stimulus.CueWedges(task.thistrial.targetLocation);
+    for i=1:4
+        stimulus.tmp.NeutralcueLocation{i}=stimulus.NeutralcueLocation{i};
+    end
+    %     if task.thistrial.CueCondition==1 || task.thistrial.CueCondition==2 || task.thistrial.CueCondition==3 || task.thistrial.CueCondition==4 %valid
+    %         stimulus.tmp.EndocueLocation=stimulus.EndocueLocation{task.thistrial.targetLocation};
+    %     elseif task.thistrial.CueCondition==5 || task.thistrial.CueCondition==6 %invalid
+    %         possibleLoc = [1 2 3 4];
+    %         potentialLoc = possibleLoc(possibleLoc~=task.thistrial.targetLocation);
+    %         stimulus.tmp.EndocueLocation=stimulus.EndocueLocation{randsample(potentialLoc,1)};
+    %     end
+    
+    stimulus.FixationStarted=0;
+    
+elseif (task.thistrial.thisseg == 8) % response
+    if ~task.thistrial.gotResponse
+        mglPlaySound(stimulus.CueSound);
+    end;
+    
+elseif (task.thistrial.thisseg == 9);
+    
+    task.randVars.fixBreak(stimulus.trialnum) = task.thistrial.fixationbreak;
+    
+    % recreate params for fixation break trials and create and add new trial to end of block
+    %% Contrast
+    if task.randVars.fixBreak(stimulus.trialnum) == 1;
+        temp = zeros(1,size(task.randVars.contrast,2)+1);
+        temp(1:size(task.randVars.contrast,2)) = task.randVars.contrast;
+        temp(end) = task.randVars.contrast(stimulus.trialnum);
+        task.randVars.contrast = temp;
+    end
+    
+    %% CueCondition
+    if task.randVars.fixBreak(stimulus.trialnum) == 1;
+        temp = zeros(1,size(task.randVars.CueCondition,2)+1);
+        temp(1:size(task.randVars.CueCondition,2)) = task.randVars.CueCondition;
+        temp(end) = task.randVars.CueCondition(stimulus.trialnum);
+        task.randVars.CueCondition = temp;
+    end
+    
+    % ! targetLocation
+    %         if task.randVars.fixBreak(stimulus.trialnum) == 1;
+    %             temp = zeros(1,size(task.randVars.targetLocation,2)+1);
+    %             temp(1:size(task.randVars.targetLocation,2)) = task.randVars.targetLocation;
+    %             temp(end) = task.randVars.targetLocation(stimulus.trialnum);
+    %             task.randVars.targetLocation = temp;
+    %         end
+    %
+    % which staircase to run
+    if task.randVars.fixBreak(stimulus.trialnum) == 1;
+        temp = zeros(1,size(task.randVars.staircase,2)+1);
+        temp(1:size(task.randVars.staircase,2)) = task.randVars.staircase;
+        temp(end) = task.randVars.staircase(stimulus.trialnum);
+        task.randVars.staircase = temp;
+    end
+    
+    %% increase number of trials
+    if task.randVars.fixBreak(stimulus.trialnum) == 1;
+        task.randVars.len_ = task.randVars.len_ + 1;
+        task.randVars.varlen_(1) = task.randVars.varlen_(1) + 1;
+        task.randVars.varlen_(2) = task.randVars.varlen_(2) + 1;
+        task.randVars.varlen_(3) = task.randVars.varlen_(3) + 1;
+        task.numTrials = task.numTrials + 1;
+        stimulus.FixationBreak = [stimulus.FixationBreak 0]; %%%%%%%%%!!!! Added to increase size of stimulus.FixationBreak matrix each added trial
+    end
+    stimulus.trialnum = stimulus.trialnum + 1;
+    
+    
+end
+
+mglClearScreen(stimulus.grayColor);
+setGammaTable(1);
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% TASK 1: function that gets called to draw the stimulus each frame
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function [task, myscreen] = DrawStimulusCallback(task, myscreen);
+global stimulus;
+
+mglClearScreen(stimulus.grayColor);%###
+
+if (task.thistrial.thisseg == 1) % ITI
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+elseif (task.thistrial.thisseg == 2) % FIXATION
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    if stimulus.EyeTrack
+        ep=myscreen.eyetracker.eyepos;
+        if (sqrt(ep(end,1)^2+ep(end,2)^2))<=stimulus.TrialStartFixDist && ~stimulus.FixationStarted
+            stimulus.FixationStart=mglGetSecs;
+            stimulus.FixationStarted=1;
+        elseif (sqrt(ep(end,1)^2+ep(end,2)^2))>=stimulus.TrialStartFixDist && stimulus.FixationStarted
+            stimulus.FixationStarted=0;
+        elseif (sqrt(ep(end,1)^2+ep(end,2)^2))<=stimulus.TrialStartFixDist
+            stimulus.FixationDur=mglGetSecs(stimulus.FixationStart);
+            if stimulus.FixationDur >=stimulus.TrialStartFixDur
+                task = jumpSegment(task);
+            end
+        end
+    else
+        mglWaitSecs(.25)
+        task = jumpSegment(task);
+    end
+    
+elseif (task.thistrial.thisseg == 3) % Endo cue
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    
+    if  task.thistrial.CueCondition==1; %|| task.thistrial.CueCondition==2 || task.thistrial.CueCondition==3 || task.thistrial.CueCondition==4 || task.thistrial.CueCondition==5 || task.thistrial.CueCondition==6
+        mglLines2(stimulus.tmp.EndocueLocation(1), stimulus.tmp.EndocueLocation(2), stimulus.tmp.EndocueLocation(3), stimulus.tmp.EndocueLocation(4),2.5,stimulus.black);
+    elseif task.thistrial.CueCondition== 7 || task.thistrial.CueCondition==8 %neutral
+        for Cue=1:4
+            mglLines2(stimulus.tmp.NeutralcueLocation{Cue}(1), stimulus.tmp.NeutralcueLocation{Cue}(2), stimulus.tmp.NeutralcueLocation{Cue}(3), stimulus.tmp.NeutralcueLocation{Cue}(4),2.5,stimulus.black);
+        end
+    end
+    
+    if stimulus.EyeTrack;%%%%% TO ADD FOR ONLINE EYETRACKING
+        ep=myscreen.eyetracker.eyepos;
+        if (sqrt(ep(end,1)^2+ep(end,2)^2))>stimulus.TrialStartFixDist
+            stimulus.FixationBreak(stimulus.trialnum)=1;
+            task.thistrial.fixationbreak = 1;
+            task = jumpSegment(task);
+        end
+    end
+    
+elseif (task.thistrial.thisseg == 4) % ISI
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    
+    if stimulus.EyeTrack%%%%% TO ADD FOR ONLINE EYETRACKING
+        ep=myscreen.eyetracker.eyepos;
+        if task.thistrial.fixationbreak == 1
+            task = jumpSegment(task);
+        end;
+        if (sqrt(ep(end,1)^2+ep(end,2)^2))>stimulus.TrialStartFixDist
+            stimulus.FixationBreak(stimulus.trialnum)=1;
+            task.thistrial.fixationbreak = 1;
+            task = jumpSegment(task);
+        end
+    end
+    
+    
+elseif (task.thistrial.thisseg == 5) % STIMULUS
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    
+    if stimulus.EyeTrack%%%%% TO ADD FOR ONLINE EYETRACKING
+        ep=myscreen.eyetracker.eyepos;
+        if task.thistrial.fixationbreak == 1
+            task = jumpSegment(task);
+        end;
+        if (sqrt(ep(end,1)^2+ep(end,2)^2))>stimulus.TrialStartFixDist
+            stimulus.FixationBreak(stimulus.trialnum)=1;
+            task.thistrial.fixationbreak = 1;
+            task = jumpSegment(task);
+        end
+    end
+    
+    % !!! important to change
+    drawGabor(stimulus.stair{stimulus.tmp.staircaseNum}.threshold,stimulus.tmp.targetLocation, stimulus.rotation(task.thistrial.targetOrientation), 1);
+    for Loc=1:length(stimulus.tmp.distractorIndices)
+        %eval(sprintf('drawGabor(0.001,stimulus.tmp.distractorLocations{Loc}, stimulus.rotation(task.thistrial.distractorOrientation%g), 1);',Loc)); % ! MODIFIED to make nullify the effect of distractors
+        eval(sprintf('drawGabor(stimulus.stair{stimulus.tmp.staircaseNum}.threshold,stimulus.tmp.distractorLocations{Loc}, stimulus.rotation(task.thistrial.distractorOrientation%g), 1);',Loc));
+    end
+    drawGabor(stimulus.stair{stimulus.tmp.staircaseNum}.threshold,stimulus.tmp.targetLocation, stimulus.rotation(task.thistrial.targetOrientation), 1);
+    
+elseif (task.thistrial.thisseg == 6) % ISI-2
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    if task.thistrial.fixationbreak == 1
+        task = jumpSegment(task);
+    end;
+    
+elseif (task.thistrial.thisseg == 7) % RESPONSE CUE
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    mglLines2(stimulus.tmp.respcueLocation(1), stimulus.tmp.respcueLocation(2), stimulus.tmp.respcueLocation(3), stimulus.tmp.respcueLocation(4),2.5,stimulus.black);
+    
+    if task.thistrial.fixationbreak == 1
+        task = jumpSegment(task);
+    end;
+
+elseif (task.thistrial.thisseg == 8) % RESPONSE WINDOW
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    mglLines2(stimulus.tmp.respcueLocation(1), stimulus.tmp.respcueLocation(2), stimulus.tmp.respcueLocation(3), stimulus.tmp.respcueLocation(4),2.5,stimulus.black);
+    
+    if ~stimulus.CueSound
+        mglPlaySound(stimulus.CueSound);
+        stimulus.CueSound=1;
+    end
+    
+    if task.thistrial.gotResponse
+        task = jumpSegment(task);
+    end;
+    if task.thistrial.fixationbreak
+        task = jumpSegment(task);
+    end
+    
+elseif (task.thistrial.thisseg == 9)% End of block Feedback
+    
+    if ~task.thistrial.fixationbreak
+        task = jumpSegment(task);
+    end
+    if task.thistrial.fixationbreak
+        mglTextSet('Helvetica',[],[0 0 0]);
+        mglTextDraw('Please fixate',[0 0]);
+    end
+    
+    
+elseif (task.thistrial.thisseg == 10)% End of block Feedback
+    mglFixationCross(stimulus.FCwidth,stimulus.FClinewidth,stimulus.black);
+    for Gabor=stimulus.LocationIndices
+        for corner=2:5
+            mglPoints2(stimulus.placeholders{Gabor}(corner,1),stimulus.placeholders{Gabor}(corner,2),stimulus.placeHolderSize,stimulus.black)
+        end
+    end
+    
+    if stimulus.trialnum<=task.numTrials% End of block Feedback
+        task = jumpSegment(task);
+    else
+        CorrectCount=0;
+        IncorrectCount=0;
+        for Stars=1:length(stimulus.starColorFeedback)
+            if stimulus.starColorFeedback(Stars)==2
+                CorrectCount=CorrectCount+1;
+            elseif stimulus.starColorFeedback(Stars)==3
+                IncorrectCount=IncorrectCount+1;
+            end
+        end
+        PercentCorrect=([num2str(round(100*(CorrectCount/(task.numTrials)))) num2str('%')]);
+        NumFixBreak=num2str(sum(stimulus.FixationBreak));
+        mglTextSet('Helvetica',[50],[0 0 0]);
+        eval(sprintf('mglTextDraw(''%s correct.'',[0 10]);',PercentCorrect));
+        eval(sprintf('mglTextDraw(''%s fixation breaks.'',[0 -10]);',NumFixBreak));
+        
+        % !
+        disp(sprintf('Observer performance was %s correct',PercentCorrect));
+        disp(sprintf('Observer broke fixation %s times',NumFixBreak));
+    end
+    
+    %% new segment for break screen
+    elseif (task.thistrial.thisseg == 11)% End of block Feedback
+        
+    if stimulus.trialnum~=task.halfwayBreak% End of block Feedback
+        task = jumpSegment(task);
+    else
+        mglTextSet('Helvetica',[],[0 0 0]);
+        mglTextDraw('Half way through block, trials will continue after a 20 sec break',[0 0]);
+       
+    end
+    
+end
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% function to get the observer's response
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function [task, myscreen] = responseCallback(task, myscreen)
+global stimulus;
+mglClearScreen(stimulus.grayColor); %###
+if ~task.thistrial.gotResponse
+    
+    % check response correct or not
+    stimulus.tmp.response = task.thistrial.whichButton == (task.thistrial.targetOrientation); %1 for left and 2 for right
+    
+    % give feedback:
+    if stimulus.tmp.response
+        mglPlaySound(stimulus.CorrectSound);
+        stimulus.stair{stimulus.tmp.staircaseNum} = upDownStaircase(stimulus.stair{stimulus.tmp.staircaseNum},1); % only updates staircase run on that trial
+        stimulus.starColorFeedback(stimulus.trialnum)=2;
+        task = jumpSegment(task);
+    else
+        mglPlaySound(stimulus.IncorrectSound);
+        stimulus.stair{stimulus.tmp.staircaseNum} = upDownStaircase(stimulus.stair{stimulus.tmp.staircaseNum},0);
+        stimulus.starColorFeedback(stimulus.trialnum)=3;
+        task = jumpSegment(task);
+    end
+end
+
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% function to draw the gabor stimulus
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function drawGabor(desiredContrast,position,orientation,sf);
+% drawGaborPedCdeltaC
+%
+%        $Id: drawGabor.m, v 1 2007/01/18 19:40:56 ?? ?? $
+%      usage: drawGabor(desiredContrast,position,orientation,sf)
+%    purpose: draw a gabor stimulus on the screen with a specified contrast
+%             within a given clut range (it finds the closest contrast to
+%             the requested one within the available clut range)
+
+global stimulus;
+% now find closest matching contrast we can display with this gamma table
+displayContrastNum = min(round(stimulus.nDisplayContrasts*desiredContrast/stimulus.currentMaxContrast),stimulus.nDisplayContrasts);
+% disp(sprintf('Desired contrast: %0.4f Actual contrast: %0.4f Difference: %0.4f',desiredContrast,stimulus.currentMaxContrast*(displayContrastNum/stimulus.nDisplayContrasts),desiredContrast-stimulus.currentMaxContrast*(displayContrastNum/stimulus.nDisplayContrasts)));
+if round(stimulus.nDisplayContrasts*desiredContrast/stimulus.currentMaxContrast)>stimulus.nDisplayContrasts
+    disp(sprintf('[drawGabor] Desired contrast out of range %0.2f > %0.2f',desiredContrast,stimulus.currentMaxContrast));
+    keyboard
+end
+
+mglBltTexture(stimulus.tex{sf}(displayContrastNum+1),position,0,0,orientation); %mglBltTexture(texture,position,hAlignment,vAlignment,rotation)
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% function to create a gamma table
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function setGammaTable(maxContrast)
+global stimulus;
+
+% set the reserved colors
+gammaTable(1:size(stimulus.reservedColors,1),1:size(stimulus.reservedColors,2))=stimulus.reservedColors;
+% create the gamma table
+cmax = 0.5+maxContrast/2;cmin = 0.5-maxContrast/2;
+luminanceVals = cmin:((cmax-cmin)/(stimulus.nGratingColors-1)):cmax;
+% now get the linearized range
+redLinearized = interp1(0:1/255:1,stimulus.linearizedGammaTable.redTable,luminanceVals,'linear');
+greenLinearized = interp1(0:1/255:1,stimulus.linearizedGammaTable.greenTable,luminanceVals,'linear');
+blueLinearized = interp1(0:1/255:1,stimulus.linearizedGammaTable.blueTable,luminanceVals,'linear');
+
+% check the table
+% plot(stimulus.linearizedGammaTable.redTable,'k');
+% hold on
+% plot(256*(0.25:0.5/250:0.75),redLinearized,'r');
+
+% set the gamma table
+gammaTable((stimulus.minGratingColors+1):256,:)=[redLinearized;greenLinearized;blueLinearized]';
+% set the gamma table
+mglSetGammaTable(gammaTable);
+% remember what the current maximum contrast is that we can display
+stimulus.currentMaxContrast = maxContrast;
+
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% function to init the stimulus
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function stimulus = myInitStimulus(stimulus,myscreen,task)
+global MGL;
+
+global stairStructure; %!!
+
+% let's get the linearized gamma table
+stimulus.linearizedGammaTable = mglGetGammaTable;
+stimulus.linearizedGammaTable.redTable(1:3) = 0; % this is just to provisionally deal with what appears to be some bug: the first value in each of these gamma tables is a NaN
+stimulus.linearizedGammaTable.greenTable(1:3) = 0;
+stimulus.linearizedGammaTable.blueTable(1:3) = 0;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% stimulus parameters:
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% gabors
+stimulus.width = 4*.8;%stimulus.gaussSdx*7;             % in deg
+stimulus.height = 4*.8;%stimulus.gaussSdy*7;            % in deg
+% stimulus.gaussSdx = 1; %0.8;  %0.3; %0.5; %1; % stimulus.width/7;                % in deg
+% stimulus.gaussSdy = 1; %0.8;  %0.3; %0.5; %1; % stimulus.height/7;               % in deg
+stimulus.gaussSdx = stimulus.width/7;                % in deg
+stimulus.gaussSdy = stimulus.height/7;               % in deg
+
+stimulus.Tilt=20; % ! degrees from vertical - should we change this to make task harder
+stimulus.rotation = [stimulus.Tilt -stimulus.Tilt]; % this is the tilt orientation of the gabor stimulus from vertical in Degrees
+stimulus.DistractorRotation = 0;
+stimulus.init = 1;
+
+stimulus.sf = 4;    %2; %5;            % in cpd
+stimulus.orientation = 90;      % in deg
+stimulus.phase = 0;             % in deg
+stimulus.eccentricity = 8*.8;  % in deg
+
+%% staircases !!!
+% In the first round, we don't enter anything into the stairStructure cell
+% so its going to take the starting contrasts that we have set
+
+cellCheck = isa(stairStructure,'cell'); % checking if lobal variable stairStructure is a cell (containing structures for each staircase)
+stimulus.StartContrast = []; % initialising for speed
+
+%If there is nothing in the stairStructure cell, set these are starting
+% values for the staircase
+
+
+
+if cellCheck == 0
+    stimulus.StartContrast(1)=.15; % LHM
+    stimulus.StartContrast(2)=.15; % UVM
+    stimulus.StartContrast(3)=.15; % LVM
+    stimulus.StartContrast(4)=.15; % RHM
+
+    
+% We will use  the Levitt rule which halves the stepsize after the 1st,3rd,7th,15th
+% reversal. 
+% stimulusStair = upDownStaircase(1,3,thresh,stepsize,'levitt')
+% So 1 up 3 down staircase, with starting contrast, an initial step size of
+% 8% contrast (which will be HALVED on the first reversal, and then again
+% on the 3rd reversal.. etc.. this isn't very helpful for us because we need more trials
+% but we are stuck on it now.
+
+    % INITIALIZES NEW staircases
+    % Staircase 1
+    stimulus.stair{1} = upDownStaircase(1,3,stimulus.StartContrast(1),.07, 'levitt'); %1 wrong the contrast goes up, 3 right it goes down, starting at 20% contrast, with an intial step size of 7%
+    stimulus.stair{1}.minThreshold = .001;
+    stimulus.stair{1}.maxThreshold = 1;
+    
+    %Staircase 2
+    stimulus.stair{2} = upDownStaircase(1,3,stimulus.StartContrast(2),.07, 'levitt');
+    stimulus.stair{2}.minThreshold = .001;
+    stimulus.stair{2}.maxThreshold = 1;
+
+    stimulus.stair{3} = upDownStaircase(1,3,stimulus.StartContrast(3),.07, 'levitt');
+    stimulus.stair{3}.minThreshold = .001;
+    stimulus.stair{3}.maxThreshold = 1;
+
+    %Staircase 4
+    stimulus.stair{4} = upDownStaircase(1,3,stimulus.StartContrast(4),.07, 'levitt');
+    stimulus.stair{4}.minThreshold = .001;
+    stimulus.stair{4}.maxThreshold = 1;
+
+else
+    stimulus.StartContrast(1)=stairStructure{1}.strength(end); %! changed these lines to index from new global var
+    stimulus.StartContrast(2)=stairStructure{2}.strength(end);
+    stimulus.StartContrast(3)=stairStructure{3}.strength(end);
+    stimulus.StartContrast(4)=stairStructure{4}.strength(end);
+
+    
+    stimulus.stair{1} = stairStructure{1,1};
+    stimulus.stair{2} = stairStructure{1,2};
+    stimulus.stair{3} = stairStructure{1,3};
+    stimulus.stair{4} = stairStructure{1,4};
+    
+end
+
+% !! Where is this variable used?
+%%% stimStair = [];
+%%% stimStair = stimulus.stair;
+
+% fixation
+stimulus.FCwidth = 0.5;
+stimulus.FClinewidth = 1.5;
+stimulus.TrialStartFixDist = 2; %1 dva radius in which to fixate before trial starts
+stimulus.TrialStartFixDur=.25; % presents stimuli after this duration when fixation detected
+stimulus.cornerDist=(stimulus.width/2);
+stimulus.placeHolderSize=2;
+
+%stimulus.ExoCueDist=(stimulus.width/2)+.5;
+%stimulus.ExoCueSize=.16;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% frames and locations:
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% stimulus.locations ={[cosd(1),cosd(1)],[cosd(1), -cosd(1)],[-cosd(1), -cosd(1)],[-cosd(1), cosd(1)]};
+stimulus.locations ={[cosd(90),sind(90)],[cosd(0), sind(0)],[cosd(-90), sind(-90)],[cosd(-180), sind(-180)]};  %4 locations: x,y coordinates are specified here. starts in N and moves clockwise
+
+for i=1:length(stimulus.locations)
+    stimulus.placeholders{i}= stimulus.eccentricity*stimulus.locations{i};
+    stimulus.placeholders{i}(2,:)= stimulus.placeholders{i}(1,1:2)+ [0 stimulus.cornerDist];
+    stimulus.placeholders{i}(3,:)= stimulus.placeholders{i}(1,1:2)+ [stimulus.cornerDist 0];
+    stimulus.placeholders{i}(4,:)= stimulus.placeholders{i}(1,1:2)+ [0 -stimulus.cornerDist];
+    stimulus.placeholders{i}(5,:)= stimulus.placeholders{i}(1,1:2)+ [-stimulus.cornerDist 0];
+end
+% Note: locations should specify a vector of length 1, i.e.,
+%                       sum(locations.^2)==1
+stimulus.frameThick = .08;
+stimulus.reservedColors = [0 0 0; 1 1 1; 0 .6 0];
+
+stimulus.precue.size  = 1.0;% for the peripheral cues
+stimulus.precue.color = [0 0 0]; % black
+stimulus.cueDist=1; %degs from outer edge of gabor
+stimulus.CueWedges=[0 90 180 270];
+
+
+% Response cue
+stimulus.rcue.XLocation{1} = [-.6; 0; -0.4; 0];
+stimulus.rcue.YLocation{1} = [ 0; .6; 0; -.6];
+stimulus.rcue.XLocation{2} = [.7; 0; 0.4; 0];
+stimulus.rcue.YLocation{2} = [ 0; .6; 0; -.6];
+stimulus.rcue.color        = [0; .6; 0]; % green
+row=[4 5 2 3];
+signs{1}=[-1 -1];signs{2}=[-1 1];signs{3}=[1 1];signs{4}=[1 -1];
+for i=1:length(stimulus.LocationIndices)
+    stimulus.EndocueLocation{i}(1:2)=.8*[stimulus.locations{i}];
+    stimulus.EndocueLocation{i}(3:4)=1.6*[stimulus.locations{i}];
+    stimulus.NeutralcueLocation{i}(1:2)=.8*[stimulus.locations{i}];
+    stimulus.NeutralcueLocation{i}(3:4)=1.0*[stimulus.locations{i}];
+end
+for i=1:length(stimulus.LocationIndices)
+    stimulus.respcueLocation{i}(1:2)=.8*[stimulus.locations{i}];
+    stimulus.respcueLocation{i}(3:4)=1.6*[stimulus.locations{i}];
+end
+% stimulus.respcueLocation{i}= [1 .5;1 .7]; %[0.8785 0;1.1714 0];
+% stimulus.respcueLocation{2}= [-.5 -1;-.7 -1];%[-0.8785 0;-1.1714 0];
+% stimulus.respcueLocation{3}= [1 -.5;1 -.7];%[0.8785 0;1.1714 0];
+% stimulus.respcueLocation{4}= [-.5 1;-.7 1];%[-0.8785 0;-1.1714 0];
+
+
+% tentative_threshold = 0.1;
+% log_steps = 1; % i.e., step=1/2 means every 2 steps is equal to doubling the contrast. step=1 means every step doubles the contrast, step=1/3 means every 3 steps double the contrast!
+% % step and number of contrast levels determine the range. We want a range
+% % that covers very low (i.e., performance is at chance) and very high
+% % (i.e., performance at ceiling).
+%
+% % % calculate a logarithmic scale, centered around the average threshold
+% stimulus.StartContrast = 2.^((-3:3)*log_steps)*tentative_threshold;
+% MG changed: stimulus.StartContrast =[0.10 0.20 0.30 0.40 0.60 0.80 0.90];
+%stimulus.StartContrast =.3; %changed to use 1 contrast level
+
+% some computations:
+% for contrast
+% idea: for low contrast stimuli, take advantage of the color-resolution of the
+% colormap (10 bits) instead of the limited resolution of the grayspace (8 bit)
+% that is available. This minimized the quatization error (causes
+% artifacts, in particular in the periphery of the Gabor) by a factor of 4
+% (2 bits). The same idea is achievable by dithering (adding random noise)
+stimulus.nReservedColors=size(stimulus.reservedColors,1);
+stimulus.nGratingColors = 256-(2*floor(stimulus.nReservedColors/2)+1);
+stimulus.minGratingColors = 2*floor(stimulus.nReservedColors/2)+1;
+stimulus.midGratingColors = stimulus.minGratingColors+floor(stimulus.nGratingColors/2);
+stimulus.maxGratingColors = 255;
+stimulus.deltaGratingColors = floor(stimulus.nGratingColors/2);
+
+% to set up color values
+stimulus.black = [0 0 0];
+stimulus.white = [1/255 1/255 1/255];
+stimulus.green = [0 6/255 0];
+stimulus.grey = [.025 .025 .025];
+stimulus.background = [stimulus.midGratingColors/255 stimulus.midGratingColors/255 stimulus.midGratingColors/255];
+stimulus.fixation.color = [0; .6; 0]'; % green
+
+% calculate a grating, a gaussian envelope (gaussian is in the alpha
+% channel), and a mask (for now, just high-contrast random noise)
+for thisSF = 1:length(stimulus.sf)      %only one spatial frequency
+    gratingMatrix{thisSF} = mglMakeGrating(stimulus.width,stimulus.height,stimulus.sf(thisSF),stimulus.orientation,stimulus.phase);
+end
+
+grating(:,:,4) = 255*mglMakeGaussian(stimulus.width,stimulus.height,stimulus.gaussSdx,stimulus.gaussSdy);
+
+% making the texture for all the Gabor stimuli:
+disppercent(-inf,'Calculating gabors');
+for thisSF = 1:length(stimulus.sf)
+    for thisContrast = 0:stimulus.deltaGratingColors
+        %% stimulus.texture
+        grating(:,:,1) = stimulus.midGratingColors+gratingMatrix{thisSF}*thisContrast;
+        grating(:,:,2) = grating(:,:,1);
+        grating(:,:,3) = grating(:,:,1);
+        stimulus.tex{thisSF}(thisContrast+1) = mglCreateTexture(grating);
+        disppercent(thisContrast/stimulus.deltaGratingColors);
+    end
+end
+disppercent(inf);
+stimulus.nDisplayContrasts = stimulus.deltaGratingColors;
+disppercent(inf);
+
+
+% calculate gray color
+stimulus.grayColor = stimulus.background; %stimulus.midGratingColors/255;
+
+% sounds
+stimulus.CueSound = find(strcmp(MGL.soundNames,'Ping'));
+stimulus.CorrectSound = find(strcmp(MGL.soundNames,'Submarine'));
+stimulus.IncorrectSound = find(strcmp(MGL.soundNames,'Basso'));

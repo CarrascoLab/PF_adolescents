@@ -1,0 +1,152 @@
+%% Set Observer and Date (YYMMDD)
+
+clear;
+Observer='CMTEST4_052221_day1'; %input subject ID
+
+addpath(genpath('/Users/purplab/Desktop/Caroline_DPF_V2_4CPD_L1/'));
+cd /Users/purplab/Desktop/Caroline_DPF_V2_4CPD_L1
+
+%addpath(genpath('/Users/purplab/Documents/Caroline'));
+%cd /Users/purplab/Documents/Caroline
+
+mglEditScreenParams; % check that all screen parameters are correct
+mglEyelinkParams; % check that all Eyelink settings are correct       
+
+%% Day 1: Training
+% DPF_ExoAttnTrainingSlow(Observer,1,0); % 24 trials, full contrast
+DPF_ExoAttnTraining(Observer,1,0); % 24 trials, 100% contrast, no eyetracking
+
+%% Day 1: Contrast Threshold
+% Caroline -
+% First, we want to collect contrast thresholds. We will do this in a
+% >different< way than before, as we want to find the contrast threshold for each of the
+% 4 locations individually and then average them together. The cleanest way
+% to do this is to interleave 4 staircases (1 per location) and then
+% average the final threshold of the 4 locations as the 80% threshold for
+% the main experiment. In the main experiment, the stimulus will appear in
+% all 4 locations and the observer makes a judgement. In this thresholding,
+% the stimulus just appears in 1 location. I'm not 100% sure of the
+% justification of having all 4 stimuli appear at once, that is something
+% you will have to figure out yourself from reading/ask Marisa/maybe relevant to an
+% attention cueing?
+
+% Why have we changed the staircase? Previously, you had 2 staircases that ran across all 4 locations.
+% The problem with this is that contrast sensitivity differs across the
+% visual field so the final threshold will never be accurate because it is just chance if a certain step/trial on the 
+% staircase comes from gabor at a horizontal or vertical location, thus we yoke a staircase to a location).
+
+% For consistency, you might want to try and figure out how to make the
+% code I've given you (where we just present a single stimulus on each
+% trial) differ so that it presents all 4, and you just cue towards 1
+% stimulus. This could be a good way to learn to code - you can compare the
+% differences between your original thresholding and this thresholding in
+% the script and adapt the new script to show 4 stimuli instead of just 1.
+% It would imagine this would take a few hours but you could do it and it
+% would help you learn what is going on inside the code.
+
+%% Caroline version old
+% DPF_ExoAttnContrastThresh(Observer,0,0); % 48 trials, neutral exo only
+% StartTiltStrengths=DPF_ExoAttnGetStartingContrast(Observer); % gets the contrast values from the first block
+% DPF_ExoAttnContrastThresh(Observer,StartTiltStrengths,0); % 48 trials, neutral exo only
+% IndContrast=DPF_ExoAttnGetContrastThresh(Observer);
+
+%% THRESHOLDING New version
+% DFP_ContrastThresholding_MH(observer,stairStruct,Eye) - stairStruct
+% contains the 4 thresholds. If it is empty (as it is here) it will start
+% from the starting threhsolds set in the code. In this case, at 18% for each
+% location. Eye is if we want eyetracking (0 for no, 1 for yes).
+[myscreen1] = DFP_ContrastThresholding_MH(Observer,[],1); %this runs the first round of thresholding - set to no eye tracking at the moment
+%Now if you look in [myscreen] you will see a cell called meanContrasts
+stairStruct1 = myscreen1.stimuli{1,1}.stair; %% This will give me my thresh
+
+%Now let's feed them in as the starting thresholds for the second block!
+% We create a new script for the second block because assuming our
+% thresholds are all now around 5% for example, the starting step size is
+% still 8%! This means once they get 3 right the contrast will plummet down
+% to -3% which will just be 0% and a waste of time. So now in this new
+% version we fine tune our starting step size to be 1.5%
+[myscreen2] = DFP_ContrastThresholding_MH(Observer,stairStruct1,1); %this runs the second round of thresholding
+stairStruct2 = myscreen2.meanContrasts;
+
+% The average of the 4 staircases, and therefore our contrast to go into the
+% experiment is IndContrast
+IndContrast = mean(stairStruct2);
+
+%% Day 1: Main Experiment, 48 trials per block, run 6-8 blocks (time permitting)
+%  Run if do not want online feedback and trial replacement
+% DPF_ExoAttnExp(Observer,IndContrast,1);    
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast); 
+
+%  Run if DO WANT online feedback and trial replacement
+% NOTE: only works for 9-pt calibration, not 6-pt
+
+
+Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);    
+IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);    
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);    
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% 
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+
+%% Day 1: Main Experiment, 48 trials per block, extended timing, run 6-8 blocks (time permitting)
+% DPF_ExoAttnExp_ExtendedTiming(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% DPF_ExoAttnExp_ExtendedTiming(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% DPF_ExoAttnExp_ExtendedTiming(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+% DPF_ExoAttnExp_ExtendedTiming(Observer,IndContrast,1);
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+
+
+%% Day 2: Get previous contrast level
+IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,0);
+IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);%This will get the previous day's contrast level
+
+%% Day 2: Practice
+DPF_ExoAttnPractice(Observer,IndContrast,1); % 16 trials, Day 1 contrast level
+
+%% Day 2: Main Experiment, 48 trials per block, run 10-12 blocks (time permitting)
+
+%  Run if do not want online feedback and trial replacement
+% DPF_ExoAttnExp(Observer,IndContrast,1);    
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast); 
+
+%  Run if DO WANT online feedback and trial replacement
+% NOTE: only works for 9-pt calibration, not 6-pt
+% Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);    
+% IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast); 
+Eyetrack_DPF_ExoAttnExp(Observer,IndContrast,1);    
+IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast); 
+
+
+
+%% Day 2: Main Experiment, 48 trials per block, extended timing, run 10-12 blocks (time permitting)
+DPF_ExoAttnExp_ExtendedTiming(Observer,IndContrast,1);
+IndContrast=DPF_ExoAttnGetBlockPerformance(Observer,IndContrast);
+%% Cursor here
